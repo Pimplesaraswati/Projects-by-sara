@@ -1,0 +1,505 @@
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include "inc/hw_gpio.h"
+#include "inc/hw_types.h"
+#include "inc/hw_memmap.h"
+#include "inc/hw_ints.h"
+#include "driverlib/fpu.h"
+#include "driverlib/debug.h"
+#include "driverlib/sysctl.h"
+#include "driverlib/pin_map.h"
+#include "driverlib/gpio.h"
+#include "driverlib/pwm.h"
+#include "driverlib/timer.h"
+#include "driverlib/adc.h"
+#include "utils/uartstdio.h"
+#include "utils/cmdline.h"
+#include "driverlib/uart.h"
+#include "driverlib/interrupt.h"
+#include "inc/hw_ints.h"
+#include "driverlib/interrupt.h"
+#include "driverlib/hibernate.h"
+#include "header_length_one.h"
+
+#include "variable.h"
+#include "sensor.h"
+
+
+
+void main(void)
+ {
+    float data_send[6];
+
+    nodefull_info nodedetails[MAX_NODE];
+    uint8_t extracted_nodecnt = 0;
+    uint32_t response_AT=0;
+    uint32_t c=0;
+    uint32_t temp_msg=0;
+
+    hardware_init();                                    //hardware initialization
+    timer_initialise();                                 //timer initialise
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x04);
+    delay_1s(1);
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x00);
+    GPIOPinWrite(GPIO_PORTB_BASE,GPIO_PIN_2|GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7, 0x00); //turn off all the sensors and gsm
+    delay_1s(1);
+
+    data_send[0]=moisture_sensor1();
+    delay_1s(1);
+    data_send[1]=soil_temperature();
+    delay_1s(1);
+    data_send[2]=humidity();
+    delay_1s(1);
+    data_send[3]=Ambient_temperature();
+    delay_1s(1);
+    data_send[4]=battery();
+    //delay_1s(1);
+    //data_send[5]=moisture_sensor2();
+    //delay_1s(1);
+
+
+    SysCtlDelay(11220);
+
+
+    GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_4, 0x00);      //turning off temp and humidity supply
+    delay_1s(1);
+
+    GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_2, 0xFF);      //GSM supply on
+    for(i=0;i<15;i++)
+        delay_1s(1);
+
+    nodedetails[extracted_nodecnt].SourceId = 369;           //node number
+    extracted_nodecnt++;
+
+    //gsm module configurations
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART3);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    HWREG(GPIO_PORTC_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY;
+    HWREG(GPIO_PORTC_BASE + GPIO_O_CR) = 0x80;
+    GPIOPinConfigure(GPIO_PC6_U3RX);
+    GPIOPinConfigure(GPIO_PC7_U3TX);
+    GPIOPinTypeUART(GPIO_PORTC_BASE, GPIO_PIN_6 | GPIO_PIN_7);
+    UARTConfigSetExpClk(UART3_BASE, SysCtlClockGet(), 115200,(UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |UART_CONFIG_PAR_NONE));
+
+    IntMasterEnable(); //enable processor interrupts
+    IntEnable(INT_UART3); //enable the UART interrupt
+    UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
+
+    UARTSend((uint8_t *)"AT", 2);
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTCharPutNonBlocking(UART3_BASE, 0x0d);
+    SysCtlDelay(SysCtlClockGet() / (4));
+
+
+
+    UARTSend((uint8_t *)"AT+MQTTCREATE=", 14);
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x22);      //"""""
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTSend((uint8_t *)"broker.mqttdashboard.com", 24);
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTCharPutNonBlocking(UART3_BASE, 0x22);
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTSend((uint8_t *)"1883", 4);
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x22);      //"""""
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTSend((uint8_t *)"soilstation", 11);
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTCharPutNonBlocking(UART3_BASE, 0x22);
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTSend((uint8_t *)"90", 2);
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+    SysCtlDelay(SysCtlClockGet() / (8));
+    UARTSend((uint8_t *)"0", 1);
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x0d);
+
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+
+    UARTSend((uint8_t *)"AT+MQTTCONN=3", 13);
+    SysCtlDelay(SysCtlClockGet() / (8));
+
+    UARTCharPutNonBlocking(UART3_BASE, 0x0d);
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+    SysCtlDelay(SysCtlClockGet() / (4));
+
+
+   UARTSend((uint8_t *)"AT+MQTTPUB=3", 12);
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x22);      //"""""
+   SysCtlDelay(SysCtlClockGet() / (8));
+   UARTSend((uint8_t *)"soilstation", 11);
+   SysCtlDelay(SysCtlClockGet() / (8));
+   UARTCharPutNonBlocking(UART3_BASE, 0x22);
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x22);      //"""""
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTSend((uint8_t *)"SENS", 4);
+   UARTCharPutNonBlocking(UART3_BASE, 0x20);                   //space
+   temp_msg=nodedetails[c].SourceId;
+   numtostring1(temp_msg);
+   realtimevalue(temp_msg);
+   UARTCharPutNonBlocking(UART3_BASE, 0x3A);
+   SysCtlDelay(SysCtlClockGet() / (16));
+
+    UARTSend((uint8_t *)"SF", 2);
+    SysCtlDelay(SysCtlClockGet() / (16));
+    UARTCharPutNonBlocking(UART3_BASE, 0x2D);
+    temp_msg1=data_send[0];
+    numtostring1(temp_msg1);
+    realtimevalue(temp_msg1);
+    UARTCharPutNonBlocking(UART3_BASE, 0x2C);                            //nextline carriage return
+    SysCtlDelay(SysCtlClockGet() / (16));
+
+   UARTSend((uint8_t *)"ST", 2);
+   SysCtlDelay(SysCtlClockGet() / (16));
+   UARTCharPutNonBlocking(UART3_BASE, 0x2D);                 //hyphen
+   SysCtlDelay(SysCtlClockGet() / (16));
+   temp_msg1=data_send[1];
+   numtostring1(temp_msg1);
+   realtimevalue(temp_msg1);
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);                //Comma
+   SysCtlDelay(SysCtlClockGet() / (16));
+
+
+   UARTSend((uint8_t *)"AH", 2);
+    SysCtlDelay(SysCtlClockGet() / (16));
+    UARTCharPutNonBlocking(UART3_BASE, 0x2D);                 //hyphen
+    SysCtlDelay(SysCtlClockGet() / (16));
+    temp_msg1=data_send[2];
+    numtostring1(temp_msg1);
+    realtimevalue(temp_msg1);
+    UARTCharPutNonBlocking(UART3_BASE, 0x2C);                //Comma
+    SysCtlDelay(SysCtlClockGet() / (16));
+
+   UARTSend((uint8_t *)"AT", 2);
+   SysCtlDelay(SysCtlClockGet() / (16));
+   UARTCharPutNonBlocking(UART3_BASE, 0x2D);                //hyphen
+   SysCtlDelay(SysCtlClockGet() / (16));
+   temp_msg1=data_send[3];
+   numtostring1(temp_msg1);
+   realtimevalue(temp_msg1);
+
+   UARTSend((uint8_t *)",BL", 3);
+   SysCtlDelay(SysCtlClockGet() / (16));
+   UARTCharPutNonBlocking(UART3_BASE, 0x2D);                //hyphen
+   SysCtlDelay(SysCtlClockGet() / (16));
+   //send_space_hyphen_space();
+   temp_msg1=data_send[4];
+   numtostring1(temp_msg1);
+   realtimevalue(temp_msg1);
+   UARTCharPutNonBlocking(UART3_BASE, 0x0A);//nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (16));
+
+   /*UARTSend((uint8_t *)"S2", 2);
+   SysCtlDelay(SysCtlClockGet() / (16));
+   UARTCharPutNonBlocking(UART3_BASE, 0x2D);
+   temp_msg1=data_send[5];
+   numtostring1(temp_msg1);
+   realtimevalue(temp_msg1);
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);                            //nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (16));
+*/
+   UARTCharPutNonBlocking(UART3_BASE, 0x22);
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTSend((uint8_t *)"0", 1);
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTSend((uint8_t *)"0", 1);
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x2C);     //  ,,,,                           //nextline carriage return
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTSend((uint8_t *)"0", 1);
+   SysCtlDelay(SysCtlClockGet() / (8));
+
+   UARTCharPutNonBlocking(UART3_BASE, 0x0d);
+   SysCtlDelay(SysCtlClockGet() / (4));
+   SysCtlDelay(SysCtlClockGet() / (4));
+   SysCtlDelay(SysCtlClockGet() / (4));
+   SysCtlDelay(SysCtlClockGet() / (4));
+   SysCtlDelay(SysCtlClockGet() / (4));
+   SysCtlDelay(SysCtlClockGet() / (4));
+
+    delay_1s(1);
+    //------clearing the rec buffer of uart3------
+    while(UARTCharsAvail(UART3_BASE))
+        temp = UARTCharGetNonBlocking(UART3_BASE);
+
+    for(i=0;i<5;i++)
+        delay_1s(1);
+
+    GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_2, 0x00);            // GSM turning OFF
+
+    for(i=0;i<5;i++)
+        delay_1s(1);
+    GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_2, 0x00);            // GSM turning OFF
+    // hibernate part
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_HIBERNATE);
+    HibernateEnableExpClk(SysCtlClockGet());
+    HibernateGPIORetentionEnable();
+    SysCtlDelay(64000000);
+    HibernateRTCEnable();
+    HibernateRTCSet(0);
+    HibernateRTCMatchSet(0,HibernateRTCGet()+3600);
+    HibernateRTCSSMatchSet(0,0);
+    HibernateWakeSet(HIBERNATE_WAKE_PIN | HIBERNATE_WAKE_RTC);
+    GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_2, 0x00);            // GSM turning OFF
+    HibernateRequest();
+    while(1)
+    {
+    }
+}
+
+int cal_data(uint16_t data1)
+{
+    int data_s=0;
+    data_s=(data1)*2;
+    return data_s;
+}
+
+
+//---------------------------------------------------------------
+// hardware_initialization code
+//---------------------------------------------------------------
+void hardware_init(void)
+{
+
+    SysCtlClockSet(SYSCTL_SYSDIV_4|SYSCTL_USE_PLL|SYSCTL_XTAL_16MHZ|SYSCTL_OSC_MAIN);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+
+    GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3);
+    GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7);
+    GPIOPadConfigSet(GPIO_PORTB_BASE,GPIO_PIN_1,GPIO_STRENGTH_8MA,GPIO_PIN_TYPE_STD_WPU);
+    GPIOPadConfigSet(GPIO_PORTB_BASE,GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4,GPIO_STRENGTH_8MA,GPIO_PIN_TYPE_STD);
+    GPIOPinTypeGPIOOutput(GPIO_PORTE_BASE, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7);
+    GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE, GPIO_PIN_3);                      //Battery enable
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC1);
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3);
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_2);
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_1);
+    GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_3);
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);                           //moisture 1
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER2);                           //moisture 2
+    TimerConfigure(WTIMER0_BASE, TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A_CAP_COUNT_UP);//TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A|TIMER_CFG_B);
+    TimerConfigure(WTIMER2_BASE, TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A_CAP_COUNT_UP);//TIMER_CFG_SPLIT_PAIR|TIMER_CFG_A|TIMER_CFG_B);
+    Moisture_sensor_PortFunctionInit();
+    TimerControlEvent(WTIMER0_BASE,TIMER_A,TIMER_EVENT_POS_EDGE);
+    TimerControlEvent(WTIMER2_BASE,TIMER_A,TIMER_EVENT_POS_EDGE);
+}
+
+void Moisture_sensor_PortFunctionInit(void)
+{
+    ///////moisture sensor 1 output pin/////////////
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER0);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    GPIOPinConfigure(GPIO_PC4_WT0CCP0);
+    GPIOPinTypeTimer(GPIO_PORTC_BASE, GPIO_PIN_4);
+
+    ///////moisture sensor 2 output pin/////////////
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_WTIMER2);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+    GPIOPinConfigure(GPIO_PD0_WT2CCP0);
+    GPIOPinTypeTimer(GPIO_PORTD_BASE, GPIO_PIN_0);
+}
+/*----------timer config for generating 1sec delay----*/
+void timer_initialise(void)
+{
+    uint32_t timerloadvalue;
+    // Enable the Timer0 peripheral
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+    // Wait for the Timer0 module to be ready.
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_TIMER0))
+    {
+    }
+    TimerConfigure(TIMER0_BASE,TIMER_CFG_PERIODIC);
+    timerloadvalue = (SysCtlClockGet());                     // period = 1s
+    TimerLoadSet(TIMER0_BASE, TIMER_A, timerloadvalue);
+    TimerIntRegister(TIMER0_BASE, TIMER_A, Timer0IntHandler);
+    IntEnable(INT_TIMER0A);                                  // Enable timer2 interrupt.
+    TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);         // enables Timer 0 to interrupt CPU
+    IntMasterEnable();                                      // Enable master interrupt
+}
+
+void Timer0IntHandler(void)
+{
+    TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+    flag = 0;
+    TimerDisable(TIMER0_BASE, TIMER_A);
+
+}
+//delay using timer
+void delay_1s(uint32_t d)
+{   int i;
+for (i=d ; i>0; i--)
+{
+    TimerEnable(TIMER0_BASE, TIMER_A);
+    flag = 1;
+    while(flag == 1)
+    {
+    }
+
+
+}
+}
+
+
+void numtostring1(float number1)
+{
+    thousand1=0;
+    hundred1=0;
+    ten1=0;
+    one1=0;
+    point1=0;
+    if(number1>=1000)
+    {
+        thousand1=(int)(number1/1000)%10;
+        hundred1=(int)(number1/100)%10;
+        ten1=(int)(number1/10)%10;
+        one1=(int)number1%10;
+        point1=(number1*10);
+        point1=(int)point1%10;
+    }
+    else if(number1>=100)
+    {
+        hundred1=(int)(number1/100)%10;
+        ten1=(int)(number1/10)%10;
+        one1=(int)number1%10;
+        point1=(number1*10);
+        point1=(int)point1%10;
+
+    }
+    else if(number1>=10)
+    {
+
+        ten1=(int)(number1/10)%10;
+        one1=(int)number1%10;
+        point1=(number1*10);
+        point1=(int)point1%10;
+    }
+    else if(number1<10)
+    {
+        one1=(int)number1%10;
+        point1=(number1*10);
+        point1=(int)point1%10;
+
+    }
+}
+void send_space_hyphen_space()
+{
+    UARTCharPutNonBlocking(UART3_BASE, 0x20);//space
+    SysCtlDelay(SysCtlClockGet() / (16));
+    UARTCharPutNonBlocking(UART3_BASE, 0x2D);//hyphen
+    SysCtlDelay(SysCtlClockGet() / (16));
+    UARTCharPutNonBlocking(UART3_BASE, 0x20);//space
+    SysCtlDelay(SysCtlClockGet() / (16));
+}
+/*--------Function to send realtime values in ascii format,function to be called in the msg body---------*/
+void realtimevalue(uint32_t v)
+{
+    if(v>=1000)
+    {
+        UARTCharPutNonBlocking(UART3_BASE, thousand1+48);
+        UARTCharPutNonBlocking(UART3_BASE, hundred1+48);
+        UARTCharPutNonBlocking(UART3_BASE, ten1+48);
+        UARTCharPutNonBlocking(UART3_BASE, one1+48);
+        if(point1>0){
+            UARTCharPutNonBlocking(UART3_BASE, 46);
+            UARTCharPutNonBlocking(UART3_BASE, point1+48);
+        }
+    }
+    else if(v>=100)
+    {
+        UARTCharPutNonBlocking(UART3_BASE, hundred1+48);
+        UARTCharPutNonBlocking(UART3_BASE, ten1+48);
+        UARTCharPutNonBlocking(UART3_BASE, one1+48);
+        if(point1>0){
+            UARTCharPutNonBlocking(UART3_BASE, 46);
+            UARTCharPutNonBlocking(UART3_BASE, point1+48);
+        }
+    }
+    else if(v>=10)
+    {
+        UARTCharPutNonBlocking(UART3_BASE, ten1+48);
+        UARTCharPutNonBlocking(UART3_BASE, one1+48);
+        if(point1>0){
+            UARTCharPutNonBlocking(UART3_BASE, 46);
+            UARTCharPutNonBlocking(UART3_BASE, point1+48);
+        }
+    }
+    else if(v<10)
+    {
+        UARTCharPutNonBlocking(UART3_BASE, one1+48);
+        if(point1>0){
+            UARTCharPutNonBlocking(UART3_BASE, 46);
+            UARTCharPutNonBlocking(UART3_BASE, point1+48);
+        }
+    }
+}
+void UARTSend(const uint8_t *pui8Buffer, uint32_t ui32Count)
+{
+    while(ui32Count--)
+    {
+        UARTCharPutNonBlocking(UART3_BASE, *pui8Buffer++);
+    }
+}
+void UARTIntHandler(void)
+{
+    uint32_t ui32Status;
+    ui32Status = UARTIntStatus(UART3_BASE, true); //get interrupt status
+    UARTIntClear(UART3_BASE, ui32Status); //clear the asserted interrupts
+    //while(UARTCharsAvail(UART3_BASE)) //loop while there are chars
+    //{
+    //  UARTCharPutNonBlocking(UART3_BASE, UARTCharGetNonBlocking(UART3_BASE)); //echo character
+    //}
+}
